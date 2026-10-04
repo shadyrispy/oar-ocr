@@ -378,16 +378,19 @@ impl DBModelBuilder {
         self,
         model_source: impl Into<crate::core::ModelSource>,
     ) -> Result<DBModel, OCRError> {
-        // Create ONNX inference engine
+        // Create ONNX inference engine. Input name is auto-detected from the
+        // session's first declared input rather than hardcoded to "x": the
+        // PP-OCRv4 seal detector declares "image", and the mismatch fails at
+        // inference time with no CLI-level diagnostic.
         let inference = if self.ort_config.is_some() {
             use crate::core::config::ModelInferenceConfig;
             let common_config = ModelInferenceConfig {
                 ort_session: self.ort_config,
                 ..Default::default()
             };
-            OrtInfer::from_config(&common_config, model_source, Some("x"))?
+            OrtInfer::from_config(&common_config, model_source, None)?
         } else {
-            OrtInfer::new(model_source, Some("x"))?
+            OrtInfer::new(model_source, None)?
         };
 
         // Create resizer

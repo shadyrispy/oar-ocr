@@ -5,6 +5,21 @@ use ort::logging::LogLevel;
 use std::sync::Mutex;
 
 impl OrtInfer {
+    /// First declared input name of the loaded session.
+    ///
+    /// Exported graphs disagree on naming: PaddleOCR detectors declare `x`, but
+    /// others (for example the PP-OCRv4 seal detector) declare `image`. Binding a
+    /// hard-coded name makes inference fail at run time on those models, so
+    /// callers that pass `input_name: None` opt into this auto-detection. Only a
+    /// graph with no declared inputs falls back to `"x"`.
+    fn first_input_name(session: &Session) -> String {
+        session
+            .inputs()
+            .first()
+            .map(|i| i.name().to_string())
+            .unwrap_or_else(|| "x".to_string())
+    }
+
     /// Creates a new OrtInfer instance with default ONNX Runtime settings and a single session.
     pub fn new(
         model_source: impl Into<ModelSource>,
@@ -17,11 +32,13 @@ impl OrtInfer {
             Some("verify model path and compatibility with selected execution providers"),
         )?;
         let model_name = "unknown_model".to_string();
+        let resolved_input_name =
+            input_name.map(str::to_string).unwrap_or_else(|| Self::first_input_name(&session));
 
         Ok(OrtInfer {
             sessions: vec![Mutex::new(session)],
             next_idx: std::sync::atomic::AtomicUsize::new(0),
-            input_name: input_name.unwrap_or("x").to_string(),
+            input_name: resolved_input_name,
             model_path: source.display_path(),
             model_name,
             run_options: None,
@@ -61,11 +78,16 @@ impl OrtInfer {
             .clone()
             .unwrap_or_else(|| "unknown_model".to_string());
         let run_options = Self::arena_shrinkage_run_options(common, &session)?;
+        // Resolve before the struct literal: fields evaluate in declaration
+        // order, so `sessions` would move `session` out before `input_name`
+        // could read it.
+        let resolved_input_name =
+            input_name.map(str::to_string).unwrap_or_else(|| Self::first_input_name(&session));
 
         Ok(OrtInfer {
             sessions: vec![Mutex::new(session)],
             next_idx: std::sync::atomic::AtomicUsize::new(0),
-            input_name: input_name.unwrap_or("x").to_string(),
+            input_name: resolved_input_name,
             model_path: source.display_path(),
             model_name,
             run_options,
